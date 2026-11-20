@@ -21,7 +21,6 @@ discover missing transitive dependencies one runtime ImportError at a
 time.
 """
 import importlib.util
-import os
 import shutil
 import sys
 import sysconfig

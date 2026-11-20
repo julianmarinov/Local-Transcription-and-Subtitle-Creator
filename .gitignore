@@ -10,3 +10,4 @@ dist/
 
 # Claude's own project-continuity notes across sessions - not part of the project
 PROJECT_MAP.md
+.idea/
