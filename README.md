@@ -10,7 +10,8 @@ video's audio, not your transcript, and not any of your own data).
 
 ## What it can do
 
-- Transcribe audio (MP3, WAV, M4A) or video (MP4, MOV) files
+- Transcribe audio (MP3, WAV, M4A, AAC, FLAC, OGG, OPUS, WMA) or video
+  (MP4, MOV, MKV, WEBM, AVI, M4V) files
 - Paste in a YouTube link instead of a file — it downloads just the audio and
   transcribes that
 - Do a whole batch at once: add several files, or an entire folder, to a
@@ -19,8 +20,9 @@ video's audio, not your transcript, and not any of your own data).
   transcript, no timestamps), and/or `.json` — pick any combination
 - Handle long recordings (1-2+ hours) automatically, without needing a
   powerful machine
-- Choose between five model sizes, trading speed for accuracy depending on
-  what you need
+- Choose between six model sizes, trading speed for accuracy depending on
+  what you need — the default, `turbo`, is near-top accuracy at high speed
+- Set the spoken language yourself, or let it detect it automatically
 
 ## Download
 
@@ -36,17 +38,23 @@ Grab the latest build for your platform from the
 2. Double-click the downloaded `.zip` to unzip it
 3. Drag **Local Transcription & Subtitle Creator.app** into your Applications
    folder (optional, but tidier)
-4. **First launch only:** right-click (or Control-click) the app and choose
-   **Open**, then click **Open** again in the dialog that appears
+4. **First launch only:** open **Terminal** (Applications → Utilities) and
+   paste this line, then press Enter:
 
-Step 4 is necessary because this app isn't signed with an Apple Developer
-certificate (that costs $99/year, which isn't worth it for a free hobby
-project) — macOS shows a warning for any unsigned app the first time you open
-it. A plain double-click may refuse to open it or just show a generic
-warning; right-click → Open is the way around that, and you only need to do
-it once. If your Mac doesn't offer an "Open" option that way, check **System
-Settings → Privacy & Security** — there's usually an "Open Anyway" button
-there after the first blocked attempt.
+   ```
+   xattr -dr com.apple.quarantine "/Applications/Local Transcription & Subtitle Creator.app"
+   ```
+
+   (If you kept the app somewhere other than Applications, type `xattr -dr
+   com.apple.quarantine ` with a trailing space and drag the app onto the
+   Terminal window instead of typing the path.) Then double-click the app.
+
+**"… is damaged and can't be opened. You should move it to the Trash."** —
+the app is not actually damaged. This is what current macOS versions say
+about any app downloaded from the internet that isn't signed with a paid
+Apple Developer certificate ($99/year — not worth it for a free hobby
+project). The older right-click → **Open** trick no longer gets past this
+message; step 4 above does, and you only need it once.
 
 ### Windows
 
@@ -73,11 +81,15 @@ certificate). Click **More info**, then **Run anyway**.
 
 Files are processed one at a time, in order — queuing more files doesn't
 speed things up, it just means less babysitting. Click **Cancel** to stop;
-it takes effect after the current chunk or file finishes, not instantly
-mid-sentence.
+it takes effect after the current part of the file finishes (long files are
+processed in 15-minute parts), not instantly mid-sentence.
 
 Output files are saved:
 - **Local files:** right next to the original file, same name, new extension
+  (an existing subtitle file with that name is replaced). If two queued files
+  share a name and differ only by extension (`talk.mp3`, `talk.mp4`), the
+  original extension is kept in the output name (`talk.mp3.srt`) so neither
+  overwrites the other
 - **YouTube links:** in your **Downloads** folder, named after the video's
   title
 
@@ -89,10 +101,16 @@ Output files are saved:
 | `base` | Fast | Basic |
 | `small` | Balanced | Good |
 | `medium` | Slower | Very good |
+| `turbo` | Fast | Excellent (default) |
 | `large` | Slowest | Best |
 
-For a quick draft or a short clip, `small` is a good default. For anything
-you'll actually publish or rely on, use `large` if you don't mind the wait.
+`turbo` (Whisper large-v3-turbo) is the default: almost the accuracy of
+`large` at several times the speed. Switch to `large` if a less common
+language comes out noticeably worse, or for a final, publish-quality pass.
+
+**Language:** leave it on *Auto-detect*, or pick the spoken language if you
+know it. Auto-detect listens to the first 30 seconds, so a video that opens
+with music or silence can get the wrong language — picking it fixes that.
 
 ### The first time you use a given model size
 
@@ -120,6 +138,11 @@ first run.
 **Does it work with languages other than English?**
 Yes — Whisper (the AI model behind this app) automatically detects the
 spoken language and transcribes dozens of languages, not just English.
+
+**Why are some subtitles split into several short ones?**
+A subtitle shows at most two lines of ~42 characters, the usual standard
+for readability. Longer passages are split into consecutive subtitles
+automatically.
 
 **Does it translate?**
 No. It transcribes in whatever language is actually spoken — it doesn't

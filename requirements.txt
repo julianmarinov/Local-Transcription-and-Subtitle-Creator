@@ -1,9 +1,11 @@
-openai-whisper>=20231117
+openai-whisper>=20240930  # first release with the "turbo" (large-v3-turbo) model
 torch>=2.2
+numpy
 yt-dlp>=2026.8.19  # YouTube changes its anti-bot/serving logic often; bump this whenever downloads start failing with 403s
 
-# macOS app-bundling tools (used only if packaging with `python setup.py py2app`)
-modulegraph~=0.19.6
-py2app~=0.28.7
-macholib~=1.16.3
-altgraph~=0.17.4
+# macOS app-bundling tools (used only if packaging with `python setup.py py2app`).
+# Marked darwin-only so Windows/Linux installs (incl. the Windows CI build) skip them.
+modulegraph~=0.19.6; sys_platform == "darwin"
+py2app~=0.28.7; sys_platform == "darwin"
+macholib~=1.16.3; sys_platform == "darwin"
+altgraph~=0.17.4; sys_platform == "darwin"

@@ -24,6 +24,7 @@ _APPROX_SIZE_MB = {
     "base": 145,
     "small": 484,
     "medium": 1500,
+    "turbo": 1600,
     "large": 3100,
 }
 

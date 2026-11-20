@@ -83,3 +83,30 @@ def test_write_text_file_creates_parent_dirs(tmp_path):
     write_text_file("hello", str(target))
     assert target.read_text(encoding="utf-8") == "hello"
     assert os.path.isdir(str(tmp_path / "nested" / "dir"))
+
+
+def test_fmt_srt_time_rounds_float_noise():
+    # 1.9999999 s must not come out as 00:00:01,999 because of truncation
+    assert fmt_srt_time(1.9999999) == "00:00:02,000"
+    assert fmt_srt_time(-0.5) == "00:00:00,000"
+
+
+def test_long_segment_is_split_into_two_line_cues():
+    from subtitles import split_long_segments
+
+    text = " ".join(["word"] * 60)  # ~300 chars -> ~8 lines at 42 chars
+    out = split_long_segments([Segment(start=10.0, end=40.0, text=text)])
+    assert len(out) > 1
+    assert out[0].start == 10.0 and out[-1].end == 40.0
+    for a, b in zip(out, out[1:]):
+        assert a.end == b.start
+    for seg in out:
+        assert len(wrap_subtitle_text(seg.text).splitlines()) <= 2
+    assert " ".join(s.text for s in out) == text
+
+
+def test_short_segment_untouched():
+    from subtitles import split_long_segments
+
+    seg = Segment(start=0.0, end=2.0, text="hello there")
+    assert split_long_segments([seg]) == [seg]

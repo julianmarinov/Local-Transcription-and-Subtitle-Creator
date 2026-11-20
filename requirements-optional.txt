@@ -10,4 +10,4 @@ mlx-whisper>=0.4.0; sys_platform == "darwin" and platform_machine == "arm64"
 
 # Faster than openai-whisper on CUDA and CPU. No MPS support - CPU-only on
 # Mac, so mlx-whisper is preferred there when both are installed.
-faster-whisper>=1.0.0
+faster-whisper>=1.1.0  # 1.1 added the "turbo" model alias

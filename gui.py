@@ -9,10 +9,41 @@ from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 import chunking
 import remote_input
-from backends import select_backend
-from transcription_service import AUDIO_VIDEO_EXTENSIONS, TranscriptionService
+from backends import MODEL_SIZES, cached_backend
+from transcription_service import (
+    AUDIO_VIDEO_EXTENSIONS,
+    OUTCOME_CANCELLED,
+    OUTCOME_DONE,
+    TranscriptionService,
+)
 
 _AUDIO_VIDEO_SUFFIXES = {ext.replace("*", "") for ext in AUDIO_VIDEO_EXTENSIONS}
+
+# Shown in the Language box. "Auto-detect" lets Whisper guess from the
+# first 30 seconds, which can go wrong on clips that open with music or
+# silence - picking the language explicitly avoids that and is slightly
+# faster.
+_LANGUAGES = {
+    "Auto-detect": None,
+    "Bulgarian": "bg",
+    "English": "en",
+    "Spanish": "es",
+    "German": "de",
+    "French": "fr",
+    "Italian": "it",
+    "Russian": "ru",
+    "Greek": "el",
+    "Turkish": "tr",
+    "Romanian": "ro",
+    "Serbian": "sr",
+    "Macedonian": "mk",
+    "Ukrainian": "uk",
+    "Polish": "pl",
+    "Portuguese": "pt",
+    "Dutch": "nl",
+}
+
+_DEFAULT_MODEL = "turbo"
 
 
 class AudioToSRTConverter(tk.Tk):
@@ -22,7 +53,9 @@ class AudioToSRTConverter(tk.Tk):
         self.geometry("820x680")
         self.transcriber = TranscriptionService()
         self._queue_rows: dict[str, str] = {}  # input_path -> Treeview item id
+        self._running = False
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_ui(self) -> None:
         frm = ttk.Frame(self)
@@ -30,12 +63,10 @@ class AudioToSRTConverter(tk.Tk):
 
         # --- Model selector
         ttk.Label(frm, text="Model:").grid(row=0, column=0, sticky="e")
-        self.model_var = tk.StringVar(value="large")
+        self.model_var = tk.StringVar(value=_DEFAULT_MODEL)
         model_combo = ttk.Combobox(frm, textvariable=self.model_var,
-                                    values=["tiny", "base", "small", "medium", "large"],
-                                    state="readonly", width=12)
+                                    values=MODEL_SIZES, state="readonly", width=12)
         model_combo.grid(row=0, column=1, sticky="w", padx=5)
-        model_combo.current(4)
 
         # --- Output formats
         ttk.Label(frm, text="Formats:").grid(row=0, column=2, sticky="e")
@@ -55,6 +86,12 @@ class AudioToSRTConverter(tk.Tk):
         self.chunk_minutes_var = tk.IntVar(value=int(chunking.DEFAULT_CHUNK_MINUTES))
         ttk.Spinbox(frm, from_=5, to=60, textvariable=self.chunk_minutes_var, width=5).grid(
             row=1, column=1, sticky="w", padx=5, pady=(5, 0))
+
+        # --- Spoken language
+        ttk.Label(frm, text="Language:").grid(row=1, column=2, sticky="e", pady=(5, 0))
+        self.language_var = tk.StringVar(value="Auto-detect")
+        ttk.Combobox(frm, textvariable=self.language_var, values=list(_LANGUAGES),
+                     state="readonly", width=14).grid(row=1, column=3, sticky="w", pady=(5, 0))
 
         # --- Queue
         queue_frm = ttk.Frame(frm)
@@ -86,7 +123,8 @@ class AudioToSRTConverter(tk.Tk):
         btn_frm.grid(row=4, column=0, columnspan=4, pady=10)
         self.go_btn = ttk.Button(btn_frm, text="Transcribe Queue", command=self._on_transcribe)
         self.go_btn.pack(side="left", padx=5)
-        ttk.Button(btn_frm, text="Cancel", command=self._on_cancel).pack(side="left")
+        self.cancel_btn = ttk.Button(btn_frm, text="Cancel", command=self._on_cancel, state="disabled")
+        self.cancel_btn.pack(side="left")
 
         # --- Status + spinner
         self.status_lbl = ttk.Label(frm, text="Ready")
@@ -107,7 +145,7 @@ class AudioToSRTConverter(tk.Tk):
         help_window.geometry("650x280")
 
         try:
-            backend = select_backend()
+            backend = cached_backend()
             device = backend.device_label()
         except Exception as e:
             # Show the failure instead of leaving the window blank -
@@ -128,7 +166,9 @@ are written next to the source file; a YouTube URL's audio is downloaded locally
 video's title - transcription itself always runs entirely on-device.
 
 Which model to choose?
-"Tiny" is the fastest model but least accurate, while "Large" is the slowest, but almost 100% accurate.
+"turbo" (default) is nearly as accurate as "large" and several times faster - the best choice
+for most videos. "large" is the most accurate but slowest. "tiny"/"base" are quick drafts only.
+Set Language if you know it - auto-detection can guess wrong on clips that start with music.
 
 Selected backend: {backend.name}
 Detected compute device: {device}
@@ -137,8 +177,9 @@ Detected compute device: {device}
 Long files (over 20 minutes) are automatically split into chunks (size configurable above)
 so memory usage stays bounded and progress updates incrementally.
 
-- Supported input formats: MP3, WAV, M4A (audio), MP4, MOV (video - audio track is extracted automatically)
-- Recommended maximum file size: 500MB per file
+- Supported input formats: MP3, WAV, M4A, AAC, FLAC, OGG, OPUS, WMA (audio),
+  MP4, MOV, MKV, WEBM, AVI, M4V (video - audio track is extracted automatically)
+- Existing subtitle files with the same name are overwritten
 """
         ttk.Label(help_window, text=help_text, justify=tk.LEFT).pack(padx=10, pady=10)
 
@@ -154,9 +195,14 @@ so memory usage stays bounded and progress updates incrementally.
         folder = filedialog.askdirectory(title="Select Folder")
         if not folder:
             return
+        added = 0
         for path in sorted(Path(folder).rglob("*")):
+            if path.name.startswith("."):  # macOS "._name" AppleDouble junk, hidden files
+                continue
             if path.is_file() and path.suffix.lower() in _AUDIO_VIDEO_SUFFIXES:
-                self._add_to_queue(str(path))
+                added += self._add_to_queue(str(path))
+        if not added:
+            messagebox.showinfo("Nothing added", "No new audio or video files were found in that folder.")
 
     def _add_url(self) -> None:
         url = simpledialog.askstring("Add YouTube URL", "Enter a video URL:", parent=self)
@@ -168,14 +214,18 @@ so memory usage stays bounded and progress updates incrementally.
             return
         self._add_to_queue(url)
 
-    def _add_to_queue(self, path: str) -> None:
+    def _add_to_queue(self, path: str) -> bool:
         if path in self._queue_rows:
-            return
+            return False
         display = path if remote_input.is_url(path) else os.path.basename(path)
         iid = self.queue_tree.insert("", "end", text=display, values=("Queued",))
         self._queue_rows[path] = iid
+        return True
 
     def _remove_selected(self) -> None:
+        if self._running:
+            messagebox.showinfo("Busy", "Wait for the current run to finish (or cancel it) before changing the queue.")
+            return
         for iid in self.queue_tree.selection():
             path = next((p for p, row_iid in self._queue_rows.items() if row_iid == iid), None)
             if path:
@@ -183,6 +233,9 @@ so memory usage stays bounded and progress updates incrementally.
             self.queue_tree.delete(iid)
 
     def _clear_queue(self) -> None:
+        if self._running:
+            messagebox.showinfo("Busy", "Wait for the current run to finish (or cancel it) before changing the queue.")
+            return
         self.queue_tree.delete(*self.queue_tree.get_children())
         self._queue_rows.clear()
 
@@ -198,26 +251,56 @@ so memory usage stays bounded and progress updates incrementally.
             return
 
         model = self.model_var.get()
-        chunk_minutes = self.chunk_minutes_var.get()
+        language = _LANGUAGES.get(self.language_var.get())
+        try:
+            chunk_minutes = max(1, min(120, int(self.chunk_minutes_var.get())))
+        except (tk.TclError, ValueError):
+            chunk_minutes = int(chunking.DEFAULT_CHUNK_MINUTES)
+            self.chunk_minutes_var.set(chunk_minutes)
 
         for path in input_paths:
             self._set_row_status(path, "Queued")
 
-        self.go_btn.config(state="disabled")
-        self.spinner.start(10)
+        self._set_running(True)
 
         status_cb = lambda msg: self.after(0, self._update_status, msg)
         text_cb = lambda txt: self.after(0, self._update_text, txt)
         error_cb = lambda msg, tb: self.after(0, self._show_error, msg, tb)
         item_status_cb = lambda path, msg: self.after(0, self._set_row_status, path, msg)
-        item_complete_cb = lambda path: self.after(0, self._set_row_status, path, "Done")
+        item_complete_cb = lambda path, outcome: self.after(0, self._on_item_complete, path, outcome)
+        finished_cb = lambda summary: self.after(0, self._on_finished, summary)
 
         t = threading.Thread(
             target=self.transcriber.transcribe_batch,
-            args=(input_paths, model, formats, status_cb, text_cb, error_cb, item_status_cb, item_complete_cb, chunk_minutes),
+            args=(input_paths, model, formats, status_cb, text_cb, error_cb, item_status_cb, item_complete_cb,
+                  chunk_minutes, language, finished_cb),
             daemon=True
         )
         t.start()
+
+    def _set_running(self, running: bool) -> None:
+        self._running = running
+        self.go_btn.config(state="disabled" if running else "normal")
+        self.cancel_btn.config(state="normal" if running else "disabled")
+        if running:
+            self.spinner.start(10)
+        else:
+            self.spinner.stop()
+
+    def _on_item_complete(self, path: str, outcome: str) -> None:
+        # Only overwrite the row on success/cancel - an error row keeps
+        # its "Error: ..." text so the user can see which file failed.
+        if outcome == OUTCOME_DONE:
+            iid = self._queue_rows.get(path)
+            current = self.queue_tree.set(iid, "status") if iid and self.queue_tree.exists(iid) else ""
+            if not current.startswith("Done"):
+                self._set_row_status(path, "Done")
+        elif outcome == OUTCOME_CANCELLED:
+            self._set_row_status(path, "Cancelled")
+
+    def _on_finished(self, summary: str) -> None:
+        self._set_running(False)
+        self.status_lbl.config(text=summary)
 
     def _set_row_status(self, path: str, status: str) -> None:
         iid = self._queue_rows.get(path)
@@ -225,14 +308,22 @@ so memory usage stays bounded and progress updates incrementally.
             self.queue_tree.set(iid, "status", status)
 
     def _on_cancel(self) -> None:
+        if not self._running:
+            return
         self.transcriber.cancel_transcription()
-        self.after(0, self._update_status, "Cancelling...")
+        self.cancel_btn.config(state="disabled")
+        self._update_status("Cancelling - stops after the current part finishes...")
+
+    def _on_close(self) -> None:
+        if self._running and not messagebox.askokcancel(
+            "Transcription running", "A transcription is still running. Quit anyway?"
+        ):
+            return
+        self.transcriber.cancel_transcription()
+        self.destroy()
 
     def _update_status(self, msg: str) -> None:
         self.status_lbl.config(text=msg)
-        if msg.startswith("Batch complete") or msg.startswith("Batch cancelled") or msg.startswith("Error"):
-            self.spinner.stop()
-            self.go_btn.config(state="normal")
 
     def _update_text(self, txt: str) -> None:
         self.txt.config(state="normal")
@@ -241,4 +332,7 @@ so memory usage stays bounded and progress updates incrementally.
         self.txt.config(state="disabled")
 
     def _show_error(self, msg: str, tb: str) -> None:
-        messagebox.showerror("Transcription Error", f"{msg}\n\n{tb}")
+        # The full traceback is noise for most users but essential for a
+        # bug report - keep the dialog short and put the tail in "detail".
+        tail = "\n".join(tb.strip().splitlines()[-12:])
+        messagebox.showerror("Transcription Error", msg, detail=tail)

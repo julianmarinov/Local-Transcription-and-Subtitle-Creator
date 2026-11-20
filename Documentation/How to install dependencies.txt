@@ -44,7 +44,9 @@ python main.py
 ### Apple Silicon (M1/M2/M3) notes
 - No Rosetta / x86_64 workaround is needed — `torch` and `openai-whisper` both ship native arm64 wheels.
 - The script auto-detects the best available device at runtime: NVIDIA CUDA GPU > Apple Silicon GPU (MPS) > CPU. You can confirm which device was picked from the "Loading model on ..." status message, or via the Help button in the app.
-- The "large" model is fairly slow even on an M1 Pro GPU; "small" or "medium" are a good speed/accuracy tradeoff for everyday use.
+- Install `requirements-optional.txt` on Apple Silicon - it adds mlx-whisper, which runs on the
+  Mac GPU and is many times faster than the openai-whisper fallback.
+- "turbo" (the default) gives near-"large" accuracy at a fraction of the time.
 
 ### Additional Notes:
 - If you are not able to run `pip` commands directly, you might need to use `python -m pip` instead.
@@ -58,8 +60,11 @@ python main.py
 Instead of running `python main.py` from a terminal each time, you can build a
 double-clickable app:
 ```
-python setup.py py2app
+./build-macos.sh
 ```
+(It wraps `python setup.py py2app`, then signs the whole bundle ad hoc and zips
+it with `ditto` - a Finder-made zip of an unsigned app is what produces the
+"is damaged and can't be opened" error after downloading it.)
 This bundles Python, all dependencies (including ffmpeg, so the app doesn't need
 Homebrew), and any installed optional backends into `dist/Local Transcription & Subtitle Creator.app`.
 It's a large build (several GB, mostly torch/mlx/ffmpeg) and can take several minutes.
@@ -73,3 +78,9 @@ approve it once:
 
 After that first approval, it opens normally (double-click or otherwise) going forward.
 This is a one-time step per machine, standard for any unsigned macOS app.
+
+On recent macOS versions a *downloaded* unsigned app shows "is damaged and can't be
+opened" instead, and right-click -> Open does not help. Clear the download flag once:
+```
+xattr -dr com.apple.quarantine "/Applications/Local Transcription & Subtitle Creator.app"
+```
